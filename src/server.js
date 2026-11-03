@@ -9,7 +9,7 @@ const PORT = 3333;
 fastify.get("/", async () => {
     return {
         message: "Finance AI funcionando!"
-    };
+    };  
 });
 
 fastify.register(transactionRoutes);

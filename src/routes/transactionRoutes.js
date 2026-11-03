@@ -1,66 +1,61 @@
 const Transaction = require("../models/Transaction");
 const validateTransaction = require("../validators/transactionValidator");
+const db = require("../database/db");
 
-const transactions = [];
-
-let nextId = 1;
+// Arredonda para 2 casas decimais (evita 0.1 + 0.2 = 0.30000000000000004)
+function round2(value) {
+    return Math.round(value * 100) / 100;
+}
 
 async function transactionRoutes(app) {
 
-// GET todas as transações com filtros
-app.get("/transactions", async (request) => {
+    // GET todas as transações com filtros
+    app.get("/transactions", async (request, reply) => {
 
-    const { category, type } = request.query;
+        const { category, type } = request.query;
 
-    let result = transactions;
-
-    if (category) {
-        result = result.filter(
-            transaction => transaction.category === category
-        );
-    }
-
-   if (type) {
-
-    if (type !== "RECEITA" && type !== "DESPESA") {
-        return {
-            error: "Type must be RECEITA or DESPESA"
-        };
-    }
-
-    result = result.filter(
-        transaction => transaction.type === type
-    );
-
-}
-    return result;
-
-});
-
-    // GET categorias utilizadas
-app.get("/categories", async () => {
-
-    const categories = [];
-
-    for (const transaction of transactions) {
-
-        if (!categories.includes(transaction.category)) {
-            categories.push(transaction.category);
+        if (type && type !== "RECEITA" && type !== "DESPESA") {
+            return reply.code(400).send({
+                error: "Type must be RECEITA or DESPESA"
+            });
         }
 
-    }
+        let sql = "SELECT * FROM transactions WHERE 1=1";
+        const params = [];
 
-    return categories;
-});
+        if (category) {
+            sql += " AND category = ?";
+            params.push(category);
+        }
+
+        if (type) {
+            sql += " AND type = ?";
+            params.push(type);
+        }
+
+        return db.prepare(sql).all(...params);
+    });
+
+
+    // GET categorias utilizadas (AGORA USA O BANCO)
+    app.get("/categories", async () => {
+
+        const rows = db.prepare(
+            "SELECT DISTINCT category FROM transactions"
+        ).all();
+
+        return rows.map(row => row.category);
+    });
+
 
     // GET uma transação pelo ID
     app.get("/transactions/:id", async (request, reply) => {
 
         const id = Number(request.params.id);
 
-        const transaction = transactions.find(
-            transaction => transaction.id === id
-        );
+        const transaction = db.prepare(
+            "SELECT * FROM transactions WHERE id = ?"
+        ).get(id);
 
         if (!transaction) {
             return reply.code(404).send({
@@ -72,41 +67,33 @@ app.get("/categories", async () => {
     });
 
 
-    // GET resumo financeiro
+    // GET resumo financeiro (AGORA USA O BANCO)
     app.get("/summary", async () => {
 
-        let totalReceitas = 0;
-        let totalDespesas = 0;
+        const totalReceitas = db.prepare(`
+            SELECT COALESCE(SUM(amount), 0) AS total
+            FROM transactions
+            WHERE type = 'RECEITA'
+        `).get().total;
 
-        for (const transaction of transactions) {
-
-            if (transaction.type === "RECEITA") {
-                totalReceitas += transaction.amount;
-            } else if (transaction.type === "DESPESA") {
-                totalDespesas += transaction.amount;
-            }
-        }
+        const totalDespesas = db.prepare(`
+            SELECT COALESCE(SUM(amount), 0) AS total
+            FROM transactions
+            WHERE type = 'DESPESA'
+        `).get().total;
 
         const saldo = totalReceitas - totalDespesas;
 
         return {
-            totalReceitas,
-            totalDespesas,
-            saldo
+            totalReceitas: round2(totalReceitas),
+            totalDespesas: round2(totalDespesas),
+            saldo: round2(saldo)
         };
     });
 
 
     // POST criar uma transação
     app.post("/transactions", async (request, reply) => {
-
-        const {
-            description,
-            amount,
-            type,
-            category,
-            date
-        } = request.body;
 
         const error = validateTransaction(request.body);
 
@@ -116,19 +103,27 @@ app.get("/categories", async () => {
             });
         }
 
-        const id = nextId;
-        nextId++;
+        const {
+            description,
+            amount,
+            type,
+            category,
+            date
+        } = request.body;
+
+        const result = db.prepare(`
+            INSERT INTO transactions (description, amount, type, category, date)
+            VALUES (?, ?, ?, ?, ?)
+        `).run(description, amount, type, category, date);
 
         const transaction = new Transaction(
-            id,
+            Number(result.lastInsertRowid),
             description,
             amount,
             type,
             category,
             date
         );
-
-        transactions.push(transaction);
 
         return reply.code(201).send(transaction);
     });
@@ -139,13 +134,21 @@ app.get("/categories", async () => {
 
         const id = Number(request.params.id);
 
-        const transaction = transactions.find(
-            transaction => transaction.id === id
-        );
+        const existing = db.prepare(
+            "SELECT * FROM transactions WHERE id = ?"
+        ).get(id);
 
-        if (!transaction) {
+        if (!existing) {
             return reply.code(404).send({
                 error: "Transaction not found"
+            });
+        }
+
+        const error = validateTransaction(request.body);
+
+        if (error) {
+            return reply.code(400).send({
+                error: error
             });
         }
 
@@ -157,21 +160,13 @@ app.get("/categories", async () => {
             date
         } = request.body;
 
-        const error = validateTransaction(request.body);
+        db.prepare(`
+            UPDATE transactions
+            SET description = ?, amount = ?, type = ?, category = ?, date = ?
+            WHERE id = ?
+        `).run(description, amount, type, category, date, id);
 
-        if (error) {
-            return reply.code(400).send({
-                error: error
-            });
-        }
-
-        transaction.description = description;
-        transaction.amount = amount;
-        transaction.type = type;
-        transaction.category = category;
-        transaction.date = date;
-
-        return transaction;
+        return new Transaction(id, description, amount, type, category, date);
     });
 
 
@@ -180,17 +175,15 @@ app.get("/categories", async () => {
 
         const id = Number(request.params.id);
 
-        const index = transactions.findIndex(
-            transaction => transaction.id === id
-        );
+        const result = db.prepare(
+            "DELETE FROM transactions WHERE id = ?"
+        ).run(id);
 
-        if (index === -1) {
+        if (result.changes === 0) {
             return reply.code(404).send({
                 error: "Transaction not found"
             });
         }
-
-        transactions.splice(index, 1);
 
         return {
             message: "Transaction deleted successfully"

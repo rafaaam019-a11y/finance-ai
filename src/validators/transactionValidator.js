@@ -11,12 +11,13 @@ function validateTransaction(data) {
         category,
         date
     } = data;
-    
-    if (!description || description.trim() === "") {
+
+    // CORREÇÃO: agora checa se é texto antes de usar o .trim()
+    if (typeof description !== "string" || description.trim() === "") {
         return "Description is required";
     }
 
-    if (typeof amount !== "number" || amount <= 0) {    
+    if (typeof amount !== "number" || amount <= 0) {
         return "Amount must be greater than zero";
     }
 
@@ -24,11 +25,13 @@ function validateTransaction(data) {
         return "Type must be RECEITA or DESPESA";
     }
 
-    if (!category || category.trim() === "") {
+    // CORREÇÃO: mesma checagem de tipo para category
+    if (typeof category !== "string" || category.trim() === "") {
         return "Category is required";
     }
 
-    if (!date || date.trim() === "") {
+    // CORREÇÃO: mesma checagem de tipo para date
+    if (typeof date !== "string" || date.trim() === "") {
         return "Date is required";
     }
 
