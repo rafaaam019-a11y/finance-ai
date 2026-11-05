@@ -1,7 +1,7 @@
 function analyzeTransaction(transaction) {
     if (
         transaction.importance === "ALTA" &&
-        transaction.impact === "ALTA") {
+        transaction.impact === "ALTO") {
             return "GASTO CRÍTICO";
         }
 

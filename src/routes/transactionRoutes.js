@@ -1,195 +1,128 @@
-const Transaction = require("../models/Transaction");
+const Database = require("better-sqlite3");
 const validateTransaction = require("../validators/transactionValidator");
-const db = require("../database/db");
+const getFullTransactionAnalysis = require("../services/financialAnalysisService");
+const generateFinancialAdvice = require("../services/aiService");
 
-// Arredonda para 2 casas decimais (evita 0.1 + 0.2 = 0.30000000000000004)
-function round2(value) {
-    return Math.round(value * 100) / 100;
-}
+const db = new Database("finance.db");
 
-async function transactionRoutes(app) {
+// Garantir a criação da tabela caso ainda não exista no banco (Persistência)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    description TEXT NOT NULL,
+    amount REAL NOT NULL,
+    type TEXT NOT NULL,
+    category TEXT NOT NULL,
+    date TEXT NOT NULL
+  )
+`);
 
-    // GET todas as transações com filtros
-    app.get("/transactions", async (request, reply) => {
+async function transactionRoutes(fastify, options) {
 
+    // GET /api/transactions
+    fastify.get("/transactions", async (request, reply) => {
         const { category, type } = request.query;
 
-        if (type && type !== "RECEITA" && type !== "DESPESA") {
-            return reply.code(400).send({
-                error: "Type must be RECEITA or DESPESA"
-            });
-        }
-
-        let sql = "SELECT * FROM transactions WHERE 1=1";
+        let query = "SELECT * FROM transactions WHERE 1=1";
         const params = [];
 
         if (category) {
-            sql += " AND category = ?";
+            query += " AND category = ?";
             params.push(category);
         }
 
         if (type) {
-            sql += " AND type = ?";
+            query += " AND type = ?";
             params.push(type);
         }
 
-        return db.prepare(sql).all(...params);
+        const transactions = db.prepare(query).all(...params);
+
+        const result = transactions.map(tx => ({
+            ...tx,
+            analysis: getFullTransactionAnalysis(tx)
+        }));
+
+        return result;
     });
 
+    // POST /api/transactions
+    fastify.post("/transactions", async (request, reply) => {
+        const validationError = validateTransaction(request.body);
 
-    // GET categorias utilizadas (AGORA USA O BANCO)
-    app.get("/categories", async () => {
-
-        const rows = db.prepare(
-            "SELECT DISTINCT category FROM transactions"
-        ).all();
-
-        return rows.map(row => row.category);
-    });
-
-
-    // GET uma transação pelo ID
-    app.get("/transactions/:id", async (request, reply) => {
-
-        const id = Number(request.params.id);
-
-        const transaction = db.prepare(
-            "SELECT * FROM transactions WHERE id = ?"
-        ).get(id);
-
-        if (!transaction) {
-            return reply.code(404).send({
-                error: "Transaction not found"
-            });
+        if (validationError) {
+            return reply.status(400).send({ error: validationError });
         }
 
-        return transaction;
-    });
+        const { description, amount, type, category, date } = request.body;
 
-
-    // GET resumo financeiro (AGORA USA O BANCO)
-    app.get("/summary", async () => {
-
-        const totalReceitas = db.prepare(`
-            SELECT COALESCE(SUM(amount), 0) AS total
-            FROM transactions
-            WHERE type = 'RECEITA'
-        `).get().total;
-
-        const totalDespesas = db.prepare(`
-            SELECT COALESCE(SUM(amount), 0) AS total
-            FROM transactions
-            WHERE type = 'DESPESA'
-        `).get().total;
-
-        const saldo = totalReceitas - totalDespesas;
-
-        return {
-            totalReceitas: round2(totalReceitas),
-            totalDespesas: round2(totalDespesas),
-            saldo: round2(saldo)
-        };
-    });
-
-
-    // POST criar uma transação
-    app.post("/transactions", async (request, reply) => {
-
-        const error = validateTransaction(request.body);
-
-        if (error) {
-            return reply.code(400).send({
-                error: error
-            });
-        }
-
-        const {
-            description,
-            amount,
-            type,
-            category,
-            date
-        } = request.body;
-
-        const result = db.prepare(`
+        const stmt = db.prepare(`
             INSERT INTO transactions (description, amount, type, category, date)
             VALUES (?, ?, ?, ?, ?)
-        `).run(description, amount, type, category, date);
+        `);
 
-        const transaction = new Transaction(
-            Number(result.lastInsertRowid),
+        const info = stmt.run(description, amount, type, category, date);
+
+        const newTransaction = {
+            id: info.lastInsertRowid,
             description,
             amount,
             type,
             category,
             date
-        );
+        };
 
-        return reply.code(201).send(transaction);
+        return reply.status(201).send({
+            ...newTransaction,
+            analysis: getFullTransactionAnalysis(newTransaction)
+        });
     });
 
+    // GET /api/summary
+    fastify.get("/summary", async (request, reply) => {
+        const incomeResult = db.prepare("SELECT SUM(amount) as total FROM transactions WHERE type = 'RECEITA'").get();
+        const expenseResult = db.prepare("SELECT SUM(amount) as total FROM transactions WHERE type = 'DESPESA'").get();
 
-    // PUT atualizar uma transação
-    app.put("/transactions/:id", async (request, reply) => {
-
-        const id = Number(request.params.id);
-
-        const existing = db.prepare(
-            "SELECT * FROM transactions WHERE id = ?"
-        ).get(id);
-
-        if (!existing) {
-            return reply.code(404).send({
-                error: "Transaction not found"
-            });
-        }
-
-        const error = validateTransaction(request.body);
-
-        if (error) {
-            return reply.code(400).send({
-                error: error
-            });
-        }
-
-        const {
-            description,
-            amount,
-            type,
-            category,
-            date
-        } = request.body;
-
-        db.prepare(`
-            UPDATE transactions
-            SET description = ?, amount = ?, type = ?, category = ?, date = ?
-            WHERE id = ?
-        `).run(description, amount, type, category, date, id);
-
-        return new Transaction(id, description, amount, type, category, date);
-    });
-
-
-    // DELETE excluir uma transação
-    app.delete("/transactions/:id", async (request, reply) => {
-
-        const id = Number(request.params.id);
-
-        const result = db.prepare(
-            "DELETE FROM transactions WHERE id = ?"
-        ).run(id);
-
-        if (result.changes === 0) {
-            return reply.code(404).send({
-                error: "Transaction not found"
-            });
-        }
+        const totalIncome = incomeResult.total || 0;
+        const totalExpenses = expenseResult.total || 0;
+        const balance = totalIncome - totalExpenses;
 
         return {
-            message: "Transaction deleted successfully"
+            income: totalIncome,
+            expenses: totalExpenses,
+            balance: balance
         };
     });
 
-}
+    // POST /api/transactions/ai-advice
+    fastify.post("/transactions/ai-advice", async (request, reply) => {
+        try {
+            const { prompt } = request.body || {};
+            const expenses = db.prepare("SELECT description, amount, type, category, date FROM transactions").all();
+
+            const advice = await generateFinancialAdvice(expenses, prompt);
+            return { advice };
+        } catch (error) {
+            return reply.status(500).send({ 
+                error: "Falha ao gerar resposta da IA.",
+                details: error.message 
+            });
+        }
+    });
+
+    // DELETE /api/transactions/:id
+    fastify.delete("/transactions/:id", async (request, reply) => {
+        const { id } = request.params;
+        const stmt = db.prepare("DELETE FROM transactions WHERE id = ?");
+        const result = stmt.run(id);
+
+        if (result.changes === 0) {
+            return reply.status(404).send({ error: "Transação não encontrada." });
+        }
+
+        return reply.send({ message: "Transação eliminada com sucesso." });
+    });
+
+} // <-- A chaveta de fecho da função transactionRoutes tem de ficar AQUI, no final!
 
 module.exports = transactionRoutes;
