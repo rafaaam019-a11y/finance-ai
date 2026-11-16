@@ -80,14 +80,15 @@
         .badge-IMPORTANTE { background: #7c2d12; color: #fdba74; }
         .badge-REVISAR { background: #713f12; color: #fde047; }
         .badge-MODERADO { background: #1e3a8a; color: #93c5fd; }
+
         @media (max-width: 600px) {
-    body { padding: 1rem; }
-    header h1 { font-size: 1.4rem; }
-    .controls-bar { flex-direction: column; align-items: stretch; gap: 0.8rem; }
-    .item { flex-direction: column; align-items: flex-start; gap: 0.6rem; }
-    .item-right { width: 100%; justify-content: space-between; }
-    .card .amount { font-size: 1.5rem; }
-}
+            body { padding: 1rem; }
+            header h1 { font-size: 1.4rem; }
+            .controls-bar { flex-direction: column; align-items: stretch; gap: 0.8rem; }
+            .item { flex-direction: column; align-items: flex-start; gap: 0.6rem; }
+            .item-right { width: 100%; justify-content: space-between; }
+            .card .amount { font-size: 1.5rem; }
+        }
     </style>
 </head>
 <body>
@@ -148,7 +149,7 @@
         </form>
 
         <div class="chart-card">
-            <h2>Distribuição de Gastos (%)</h2>
+            <h2>Receita do Mês (%)</h2>
             <div class="chart-container">
                 <canvas id="categoryChart"></canvas>
             </div>
@@ -204,7 +205,7 @@
             document.getElementById("total-expenses").innerText = `R$ ${expenses.toFixed(2)}`;
             document.getElementById("total-balance").innerText = `R$ ${(income - expenses).toFixed(2)}`;
 
-            updateChart(categoriesMap);
+            updateChart(categoriesMap, income);
             renderTransactionsList(currentMonthTransactions);
         } catch (err) {
             console.error("Erro ao carregar dados:", err);
@@ -289,7 +290,7 @@
         URL.revokeObjectURL(url);
     }
 
-    function updateChart(categoriesData) {
+    function updateChart(categoriesData, income) {
         const labels = Object.keys(categoriesData);
         const data = Object.values(categoriesData);
         const ctx = document.getElementById('categoryChart').getContext('2d');
@@ -299,17 +300,29 @@
         }
 
         const totalExpenses = data.reduce((a, b) => a + b, 0);
+        const saldo = income - totalExpenses;
+
+        // se sobrou dinheiro, adiciona a fatia "Saldo restante"
+        if (saldo > 0) {
+            labels.push("Saldo restante");
+            data.push(saldo);
+        }
+
+        // total do círculo: a receita (ou os gastos, se gastou mais do que recebeu)
+        const total = data.reduce((a, b) => a + b, 0);
+
+        const palette = ['#ef4444', '#f59e0b', '#6366f1', '#8b5cf6', '#ec4899', '#f97316', '#eab308'];
+        const colors = labels.map((label, i) =>
+            label === "Saldo restante" ? '#10b981' : palette[i % palette.length]
+        );
 
         categoryChart = new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: labels.length ? labels : ['Sem despesas'],
+                labels: labels.length ? labels : ['Sem movimentações'],
                 datasets: [{
                     data: data.length ? data : [1],
-                    backgroundColor: labels.length ? [
-                        '#ef4444', '#f59e0b', '#10b981', '#6366f1', 
-                        '#8b5cf6', '#ec4899', '#14b8a6'
-                    ] : ['#334155'],
+                    backgroundColor: labels.length ? colors : ['#334155'],
                     borderWidth: 0
                 }]
             },
@@ -324,8 +337,8 @@
                         color: '#ffffff',
                         font: { weight: 'bold', size: 12 },
                         formatter: (value) => {
-                            if (!labels.length || totalExpenses === 0) return '';
-                            const percentage = ((value / totalExpenses) * 100).toFixed(1);
+                            if (!labels.length || total === 0) return '';
+                            const percentage = ((value / total) * 100).toFixed(1);
                             return `${percentage}%`;
                         }
                     }
