@@ -1,44 +1,30 @@
-    # Finance AI
+# 💰 Finance AI — Gestor Financeiro com Assistente de IA
 
-API de controle financeiro feita com Node.js, Fastify e SQLite.
+Aplicação full-stack de gestão financeira pessoal desenvolvida com **Node.js**, **Fastify** e **SQLite**, equipada com gráficos dinâmicos baseados na receita, exportação para Excel e um assistente financeiro inteligente integrado à **API do Google Gemini**.
 
-## Tecnologias
+## ✨ Funcionalidades
 
-- Node.js
-- Fastify
-- SQLite (better-sqlite3)
+* **Dashboard Interativo:** Visualização dinâmica de gráficos baseados na receita e distribuição de despesas por categoria (Chart.js).
+* **Gestão de Transações:** Registo, listagem e controlo mensal de entradas e saídas (`Transaction.js`).
+* **Assistente Financeiro com IA:** Chat integrado (`aiService.js`) com regras personalizadas para analisar os teus dados financeiros e tirar dúvidas em tempo real.
+* **Exportação de Dados:** Geração de relatórios em formato Excel para controlo externo.
 
-## Como rodar
+## 🛠️ Tecnologias Utilizadas
 
-```
-npm install
-npm run dev
-```
+* **Frontend:** HTML5, CSS3, JavaScript, Chart.js (`public/index.html`)
+* **Backend:** Node.js, Fastify
+* **Base de Dados:** SQLite (`better-sqlite3`)
+* **Inteligência Artificial:** Google Gemini API (`gemini-2.5-flash`)
 
-O servidor sobe em `http://localhost:3333`.
+## 📂 Estrutura do Projeto
 
-## Rotas
-
-| Método | Rota | O que faz |
-|--------|------|-----------|
-| GET | /transactions | Lista transações (filtros: `category`, `type`) |
-| GET | /transactions/:id | Busca uma transação pelo ID |
-| POST | /transactions | Cria uma transação |
-| PUT | /transactions/:id | Atualiza uma transação |
-| DELETE | /transactions/:id | Exclui uma transação |
-| GET | /categories | Lista as categorias usadas |
-| GET | /summary | Mostra receitas, despesas e saldo |
-
-## Exemplo de transação
-
-```json
-{
-  "description": "Salário",
-  "amount": 3000,
-  "type": "RECEITA",
-  "category": "Trabalho",
-  "date": "2026-11-03"
-}
-```
-
-O campo `type` aceita apenas `RECEITA` ou `DESPESA`.
+```text
+├── public/
+│   └── index.html          # Interface principal e gráficos
+├── src/
+│   ├── models/
+│   │   └── Transaction.js  # Modelo de dados e operações SQLite
+│   └── services/
+│       └── aiService.js    # Lógica de integração e regras do chat com IA
+├── package.json
+└── README.md
